@@ -112,11 +112,13 @@ The project uses a ConfigurationsService to manage job settings and CRON express
 Example Configuration:
 
 ```json
-{
-  "JobSettings": {
-    "SampleJobExample": {
-      "CronExpression": "*/5 * * * *"
-    }
-  }
+"ConfigHangFire": {
+  "WorkerCount": 5,
+  "SemaphoreTimeOutInMinutes": 30,
+  "DashboardAuth": {
+    "Username": "admin",
+    "Password": "123"
+  },
+  "CronExpression": "0 * * * *"
 }
 ```
