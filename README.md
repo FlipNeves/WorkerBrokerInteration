@@ -1,124 +1,216 @@
-# WorkerBrokerInteraction
+# Dynamic Job Scheduler with Hangfire
 
-WorkerBrokerInteraction is a study project that demonstrates how to manage and schedule background jobs in .NET using Hangfire. The project explores concepts such as job scheduling, recurring jobs, job execution management, and worker services integration, all in a structured and modular way.
+A template project demonstrating how to build a **dynamic job scheduling system** using Hangfire, where jobs are fully controlled through database configuration.
 
-## Table of Contents
+## ✨ Key Features
 
-- Overview
-- Features
-- Technologies
-- Getting Started
-  - Prerequisites
-  - Installation
-  - Usage
-    - Adding New Jobs
-    - Managing Job Execution
-  - Configuration
+- **Database-Driven Jobs** — Jobs are configured entirely in the database, no code changes needed
+- **Auto-Sync with Hangfire** — Active jobs are registered, inactive jobs are automatically removed
+- **DI Container Integration** — Jobs are resolved through dependency injection
+- **Type Discovery** — Jobs are discovered by type name using reflection
+- **Execution Tracking** — Last execution timestamp is recorded for each job
 
-## Overview
+## 🏗️ Architecture
 
-The WorkerBrokerInteraction project is designed to demonstrate the following key concepts:
-
-- Background job processing using Hangfire.
-- Recurring job scheduling and management.
-- Best practices for managing job lifecycle, including checking if a job is running before scheduling it.
-- Modular architecture with clear separation between job definitions, scheduling, and execution.
-
-This project serves as a learning tool for developers who want to explore job scheduling and worker management in .NET.
-
-## Features
-
-- Background Job Scheduling: Uses Hangfire for easy and efficient job scheduling.
-- Recurring Jobs: Allows the configuration of jobs to run at specific intervals using CRON expressions.
-- Job Management: Ensures jobs do not overlap by checking if they are already running before starting a new instance.
-- Flexible Job Definitions: Jobs are added and updated dynamically through configuration.
-
-## Technologies
-
-- .NET Core: Backend framework.
-- Hangfire: Library for background job processing.
-- RabbitMQ (optional): Can be used for message brokering and communication between services (if extended).
-- Dependency Injection: Follows DI principles to manage services and job configurations.
-
-## Getting Started
-
-### Prerequisites
-
-To run the project, ensure you have the following installed:
-
-- .NET Core SDK (version 6.0 or later)
-- Hangfire (included as a dependency)
-
-### Installation
-
-1. Clone the repository:
-
-   git clone https://github.com/FlipNeves/WorkerBrokerInteration
-   cd WorkerBrokerInteraction
-
-2. Install dependencies: Restore the required NuGet packages:
-
-   dotnet restore
-
-3. Run the application:
-
-   dotnet run
-
-## Usage
-
-### Adding New Jobs
-
-To add new jobs to the scheduling system, follow these steps:
-
-1. Define the Job: In the Execute method of the JobSchedulerService, add the new job to the jobDefinitions list:
-
-```cs
-   var jobDefinitions = new List<(Type jobType, string jobId)>
-   {
-       (typeof(YourNewJobType), RecurringJobsIds.YourNewJobId)
-   };
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Hangfire                                 │
+│  ┌─────────────────┐    ┌─────────────────┐                    │
+│  │  JobScheduler   │───▶│   SampleJob     │                    │
+│  │  (runs on cron) │    │   AnotherJob    │                    │
+│  └────────┬────────┘    └─────────────────┘                    │
+└───────────┼─────────────────────────────────────────────────────┘
+            │
+            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    JobSchedulerService                          │
+│  • GetAllActiveAsync() → Register jobs in Hangfire              │
+│  • GetAllInactiveJobIdsAsync() → Remove jobs from Hangfire      │
+│  • ExecuteJobAsync() → Run job & update last execution          │
+└───────────┬─────────────────────────────────────────────────────┘
+            │
+            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Database (JobConfiguration)                  │
+│  ┌──────┬────────────┬─────────────┬────────────┬──────────┐   │
+│  │  Id  │   JobId    │ JobTypeName │    Cron    │ IsActive │   │
+│  ├──────┼────────────┼─────────────┼────────────┼──────────┤   │
+│  │  1   │ SampleJob  │ ...SampleJob│ */5 * * * *│   true   │   │
+│  │  2   │ OtherJob   │ ...OtherJob │ 0 * * * *  │   true   │   │
+│  │  3   │ DisabledJob│ ...Disabled │ 0 0 * * *  │  false   │   │
+│  └──────┴────────────┴─────────────┴────────────┴──────────┘   │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-2. Configure the CRON expression: Extend the GetCronExpression method to return a CRON expression for the new job:
+## 📁 Project Structure
 
-```cs
-   private string GetCronExpression(Type jobType) => jobType switch
-   {
-       var t when t == typeof(YourNewJobType) => _configurationsService.GetCronYourNewJob(),
-       _ => throw new NotSupportedException($"Unsupported job type: {jobType.Name}")
-   };
+```
+WorkerBrokerInteration/
+├── Domain/
+│   ├── Entities/
+│   │   └── JobConfiguration.cs       # Database entity
+│   └── Interfaces/
+│       ├── IJob.cs                   # Base interface for all jobs
+│       └── IJobConfigurationRepository.cs
+├── Infrastructure/
+│   └── Repositories/
+│       └── JobConfigurationRepository.cs  # Mock repository (replace with EF Core)
+├── Services/
+│   ├── Interfaces/
+│   │   └── IJobSchedulerService.cs
+│   └── JobSchedulerService.cs        # Core sync logic
+├── Jobs/
+│   ├── SampleJob.cs                  # Example job implementation
+│   └── AnotherSampleJob.cs
+├── HangFireBasics/
+│   ├── CreaterJobs.cs                # Registers the scheduler
+│   └── HangFireDashboardFilter.cs    # Dashboard authentication
+└── Program.cs
 ```
 
-3. Update the Configuration: Ensure the new job's configuration is included in your configuration service or appsettings.json.
+## 🚀 Quick Start
 
-### Managing Job Execution
+### 1. Clone and Run
 
-Before scheduling a job, the system checks whether an instance of the job is already running to prevent overlap. This is done using the IsJobRunning method:
+```bash
+git clone https://github.com/FlipNeves/WorkerBrokerInteration
+cd WorkerBrokerInteration/WorkerBrokerInteration
+dotnet run
+```
 
-```cs
-private async Task<bool> IsJobRunning(Type jobType)
+### 2. Access Hangfire Dashboard
+
+Navigate to `https://localhost:{PORT}/jobs`
+
+**Credentials:** `admin` / `123`
+
+## 📝 How to Add a New Job
+
+### Step 1: Create the Job Class
+
+```csharp
+public class MyNewJob : IJob
 {
-    var runningJobs = JobStorage.Current.GetMonitoringApi().ProcessingJobs(0, int.MaxValue);
-    return runningJobs.Any(job => job.Value.Job.Type == jobType);
+    private readonly ILogger<MyNewJob> _logger;
+
+    public string JobId => "MyNewJob";  // Must match database JobId
+
+    public MyNewJob(ILogger<MyNewJob> logger)
+    {
+        _logger = logger;
+    }
+
+    public async Task ExecuteAsync(CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("[{JobId}] Starting...", JobId);
+        
+        // Your job logic here
+        await Task.Delay(1000, cancellationToken);
+        
+        _logger.LogInformation("[{JobId}] Completed.", JobId);
+    }
 }
 ```
 
-This ensures that jobs are not scheduled concurrently and that system resources are efficiently managed.
+### Step 2: Register in DI Container (Program.cs)
 
-## Configuration
+```csharp
+builder.Services.AddScoped<MyNewJob>();
+```
 
-The project uses a ConfigurationsService to manage job settings and CRON expressions. You can extend this service to provide custom job configurations and define schedules for your jobs.
+### Step 3: Add Database Configuration
 
-Example Configuration:
+Add to `JobConfigurationRepository.cs` (or your actual database):
+
+```csharp
+new JobConfiguration
+{
+    Id = 4,
+    JobId = "MyNewJob",
+    JobTypeName = "WorkerBrokerInteration.Jobs.MyNewJob",
+    CronExpression = "0 */2 * * *",  // Every 2 hours
+    IsActive = true,
+    CreatedAt = DateTime.UtcNow,
+    UpdatedAt = DateTime.UtcNow
+}
+```
+
+That's it! The job will be automatically registered in Hangfire on the next sync cycle.
+
+## 🔄 How Job Sync Works
+
+The `JobSchedulerService` runs periodically (controlled by `ConfigHangFire:CronExpression`) and:
+
+1. **Fetches active jobs** from the database
+2. **Registers/updates** each job in Hangfire using `AddOrUpdate`
+3. **Fetches inactive job IDs** from the database
+4. **Removes** those jobs from Hangfire using `RemoveIfExists`
+
+```
+[JobScheduler] Starting job synchronization...
+[JobScheduler] Job registered/updated: SampleJob | Cron: */5 * * * *
+[JobScheduler] Job registered/updated: AnotherSampleJob | Cron: 0 * * * *
+[JobScheduler] Job removed from Hangfire: InactiveJob
+[JobScheduler] Job synchronization completed.
+```
+
+## ⚙️ Configuration
+
+### appsettings.json
 
 ```json
-"ConfigHangFire": {
-  "WorkerCount": 5,
-  "SemaphoreTimeOutInMinutes": 30,
-  "DashboardAuth": {
-    "Username": "admin",
-    "Password": "123"
-  },
-  "CronExpression": "0 * * * *"
+{
+  "ConfigHangFire": {
+    "WorkerCount": 5,
+    "SemaphoreTimeOutInMinutes": 30,
+    "DashboardAuth": {
+      "Username": "admin",
+      "Password": "your-secure-password"
+    },
+    "CronExpression": "* * * * *"  // How often to sync jobs
+  }
 }
 ```
+
+### Cron Expression Examples
+
+| Expression | Description |
+|------------|-------------|
+| `* * * * *` | Every minute |
+| `*/5 * * * *` | Every 5 minutes |
+| `0 * * * *` | Every hour |
+| `0 0 * * *` | Daily at midnight |
+| `0 0 * * 0` | Weekly on Sunday |
+
+## 🔧 Production Considerations
+
+### Replace Mock Repository
+
+The current `JobConfigurationRepository` uses an in-memory list. For production:
+
+1. Add Entity Framework Core packages
+2. Create `AppDbContext` with `DbSet<JobConfiguration>`
+3. Implement repository using EF Core
+4. Add connection string to `appsettings.json`
+
+### Use Persistent Storage
+
+Replace Hangfire's MemoryStorage with a persistent option:
+
+```csharp
+// SQL Server
+builder.Services.AddHangfire(config => 
+    config.UseSqlServerStorage(connectionString));
+
+// Redis
+builder.Services.AddHangfire(config => 
+    config.UseRedisStorage(connectionString));
+```
+
+## 📄 License
+
+MIT License - feel free to use this template in your projects.
+
+## 🤝 Contributing
+
+Contributions are welcome! Feel free to open issues or submit pull requests.
