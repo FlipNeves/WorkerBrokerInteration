@@ -21,7 +21,6 @@ builder.Services.AddControllers();
 builder.Services.Configure<ConfigHangFire>(configuration.GetSection("ConfigHangFire"));
 
 builder.Services.AddScoped<IJobConfigurationRepository, JobConfigurationRepository>();
-
 builder.Services.AddScoped<IJobSchedulerService, JobSchedulerService>();
 
 // Add all jobs to DI 
@@ -40,6 +39,14 @@ builder.Services.AddHangfireServer((serviceProvider, options) =>
     var configHangfire = serviceProvider.GetRequiredService<IOptions<ConfigHangFire>>().Value;
     options.WorkerCount = configHangfire.WorkerCount;
 });
+
+// Message Broker (RabbitMQ) Configurations
+builder.Services.Configure<MessageBrokerConfig>(configuration.GetSection("MessageBroker"));
+builder.Services.Configure<ExternalBrokerConfig>(configuration.GetSection("MessageBroker:ExternalBroker"));
+builder.Services.Configure<ParallelProcessingConfig>(configuration.GetSection("ParallelProcessing"));
+
+// Register Broker services (Publisher + Consumers)
+builder.Services.AddBrokerServices();
 
 var app = builder.Build();
 
