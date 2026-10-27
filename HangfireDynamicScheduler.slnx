@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/HangfireDynamicScheduler/HangfireDynamicScheduler.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HangfireDynamicScheduler.Tests/HangfireDynamicScheduler.Tests.csproj" />
+  </Folder>
+</Solution>
