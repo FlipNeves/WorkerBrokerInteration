@@ -1,216 +1,120 @@
 # Dynamic Job Scheduler with Hangfire
 
-A template project demonstrating how to build a **dynamic job scheduling system** using Hangfire, where jobs are fully controlled through database configuration.
+A .NET 10 template for background jobs whose schedule lives in a database. Hangfire runs the jobs and RabbitMQ carries the events they produce.
 
-## ✨ Key Features
+Change a job's cron or turn it off in the database, or through the API, and the scheduler follows without a redeploy.
 
-- **Database-Driven Jobs** — Jobs are configured entirely in the database, no code changes needed
-- **Auto-Sync with Hangfire** — Active jobs are registered, inactive jobs are automatically removed
-- **DI Container Integration** — Jobs are resolved through dependency injection
-- **Type Discovery** — Jobs are discovered by type name using reflection
-- **Execution Tracking** — Last execution timestamp is recorded for each job
+> The same template built on Quartz.NET: [quartz-worker-job-template](https://github.com/FlipNeves/quartz-worker-job-template). Both share the domain, persistence, broker and API. Only the scheduler adapter changes.
 
-## 🏗️ Architecture
+## How it works
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Hangfire                                 │
-│  ┌─────────────────┐    ┌─────────────────┐                     │
-│  │  JobScheduler   │───▶│   SampleJob     │                    │
-│  │  (runs on cron) │    │   AnotherJob    │                     │
-│  └────────┬────────┘    └─────────────────┘                     │
-└───────────┼─────────────────────────────────────────────────────┘
-            │
-            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    JobSchedulerService                          │
-│  • GetAllActiveAsync() → Register jobs in Hangfire              │
-│  • GetAllInactiveJobIdsAsync() → Remove jobs from Hangfire      │
-│  • ExecuteJobAsync() → Run job & update last execution          │
-└───────────┬─────────────────────────────────────────────────────┘
-            │
-            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Database (JobConfiguration)                  │
-│  ┌──────┬────────────┬─────────────┬────────────┬──────────┐    │
-│  │  Id  │   JobId    │ JobTypeName │    Cron    │ IsActive │    │
-│  ├──────┼────────────┼─────────────┼────────────┼──────────┤    │
-│  │  1   │ SampleJob  │ ...SampleJob│ */5 * * * *│   true   │    │
-│  │  2   │ OtherJob   │ ...OtherJob │ 0 * * * *  │   true   │    │
-│  │  3   │ DisabledJob│ ...Disabled │ 0 0 * * *  │  false   │    │
-│  └──────┴────────────┴─────────────┴────────────┴──────────┘    │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    db[(JobConfigurations<br/>SQLite)] -->|startup, every minute,<br/>PUT /api/jobs| sync[JobSynchronizer]
+    sync --> scheduler[IJobScheduler<br/>Hangfire]
+    scheduler -->|cron fires| runner[JobRunner]
+    runner --> job[SampleJob]
+    runner -->|LastExecutedAt| db
+    job -->|publish| queue[[RabbitMQ<br/>SampleQueueEvent]]
+    queue --> consumer[SampleQueueConsumer]
 ```
 
-## 📁 Project Structure
+1. The `JobConfigurations` table is the source of truth: one row per job, with its cron and an active flag.
+2. `JobSynchronizer` reads the table on startup, every `Scheduler:SyncInterval` and right after `PUT /api/jobs/{jobId}`. Active jobs are added to Hangfire or updated. Inactive jobs, and jobs deleted from the table, are removed.
+3. When the cron fires, `JobRunner` resolves the job from dependency injection, runs it and records `LastExecutedAt`.
+4. `SampleJob` publishes a report to RabbitMQ. `SampleQueueConsumer` acknowledges each message it processes and rejects the ones that fail.
 
-```
-WorkerBrokerInteration/
-├── Domain/
-│   ├── Entities/
-│   │   └── JobConfiguration.cs       # Database entity
-│   └── Interfaces/
-│       ├── IJob.cs                   # Base interface for all jobs
-│       └── IJobConfigurationRepository.cs
-├── Infrastructure/
-│   └── Repositories/
-│       └── JobConfigurationRepository.cs  # Mock repository (replace with EF Core)
-├── Services/
-│   ├── Interfaces/
-│   │   └── IJobSchedulerService.cs
-│   └── JobSchedulerService.cs        # Core sync logic
-├── Jobs/
-│   ├── SampleJob.cs                  # Example job implementation
-│   └── AnotherSampleJob.cs
-├── HangFireBasics/
-│   ├── CreaterJobs.cs                # Registers the scheduler
-│   └── HangFireDashboardFilter.cs    # Dashboard authentication
-└── Program.cs
-```
+## Features
 
-## 🚀 Quick Start
+- Schedule stored in SQLite with EF Core, created and seeded on startup
+- Jobs API to list jobs with their last and next run, and to change the cron or turn a job on and off at runtime
+- Scheduler behind `IJobScheduler`: all Hangfire code lives in `Infrastructure/Scheduling`
+- RabbitMQ publisher and consumer base class on RabbitMQ.Client 7. Consumers keep retrying while the broker is down, and the API answers 503 instead of failing
+- Hangfire dashboard at `/jobs`, protected by Basic authentication
+- Unit tests for the synchronizer, the runner, the repository and the Hangfire adapter
 
-### 1. Clone and Run
+## Quick start
+
+You need the .NET 10 SDK and Docker.
 
 ```bash
-git clone https://github.com/FlipNeves/WorkerBrokerInteration
-cd WorkerBrokerInteration/WorkerBrokerInteration
-dotnet run
+docker compose up -d
+dotnet run --project src/WorkerBrokerInteration
 ```
 
-### 2. Access Hangfire Dashboard
+- Swagger: http://localhost:5242/swagger
+- Hangfire dashboard: http://localhost:5242/jobs (`admin` / `admin` in Development; in other environments set `HangfireDashboard`, the dashboard stays locked while it is empty)
+- RabbitMQ management: http://localhost:15672 (`guest` / `guest`)
 
-Navigate to `https://localhost:{PORT}/jobs`
+## Try it
 
-**Credentials:** `admin` / `123`
+```bash
+curl http://localhost:5242/api/jobs
 
-## 📝 How to Add a New Job
+curl -X PUT http://localhost:5242/api/jobs/AnotherSampleJob \
+  -H "Content-Type: application/json" \
+  -d '{"cronExpression":"* * * * *","isActive":true}'
 
-### Step 1: Create the Job Class
+curl -X POST "http://localhost:5242/api/queue/send?message=12345"
 
-```csharp
-public class MyNewJob : IJob
-{
-    private readonly ILogger<MyNewJob> _logger;
+curl -X POST http://localhost:5242/api/queue/send-body \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Test"}'
 
-    public string JobId => "MyNewJob";  // Must match database JobId
-
-    public MyNewJob(ILogger<MyNewJob> logger)
-    {
-        _logger = logger;
-    }
-
-    public async Task ExecuteAsync(CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("[{JobId}] Starting...", JobId);
-        
-        // Your job logic here
-        await Task.Delay(1000, cancellationToken);
-        
-        _logger.LogInformation("[{JobId}] Completed.", JobId);
-    }
-}
+curl -X POST http://localhost:5242/api/queue/send-batch \
+  -H "Content-Type: application/json" \
+  -d '["a","b","c"]'
 ```
 
-### Step 2: Register in DI Container (Program.cs)
+## Adding a job
 
-```csharp
-builder.Services.AddScoped<MyNewJob>();
-```
+1. Implement `IJob`:
 
-### Step 3: Add Database Configuration
+   ```csharp
+   public sealed class InvoiceReminderJob : IJob
+   {
+       public Task ExecuteAsync(CancellationToken cancellationToken)
+       {
+           return Task.CompletedTask;
+       }
+   }
+   ```
 
-Add to `JobConfigurationRepository.cs` (or your actual database):
+2. Register it in `Program.cs` with `.AddJob<InvoiceReminderJob>()`. The job id is the class name.
+3. Insert a row in `JobConfigurations` with `JobId = 'InvoiceReminderJob'`, a cron and `IsActive = 1`. The next synchronization schedules it.
 
-```csharp
-new JobConfiguration
-{
-    Id = 4,
-    JobId = "MyNewJob",
-    JobTypeName = "WorkerBrokerInteration.Jobs.MyNewJob",
-    CronExpression = "0 */2 * * *",  // Every 2 hours
-    IsActive = true,
-    CreatedAt = DateTime.UtcNow,
-    UpdatedAt = DateTime.UtcNow
-}
-```
+Crons use the standard five fields: minute, hour, day of month, month and day of week (`*/5 9-18 * * 1-5`).
 
-That's it! The job will be automatically registered in Hangfire on the next sync cycle.
+## Adding a consumer
 
-## 🔄 How Job Sync Works
+Add the queue to `QueueEventType`, inherit from `EventConsumerBase`, implement `HandleAsync` and register the class with `AddHostedService<T>()`.
 
-The `JobSchedulerService` runs periodically (controlled by `ConfigHangFire:CronExpression`) and:
-
-1. **Fetches active jobs** from the database
-2. **Registers/updates** each job in Hangfire using `AddOrUpdate`
-3. **Fetches inactive job IDs** from the database
-4. **Removes** those jobs from Hangfire using `RemoveIfExists`
+## Project structure
 
 ```
-[JobScheduler] Starting job synchronization...
-[JobScheduler] Job registered/updated: SampleJob | Cron: */5 * * * *
-[JobScheduler] Job registered/updated: AnotherSampleJob | Cron: 0 * * * *
-[JobScheduler] Job removed from Hangfire: InactiveJob
-[JobScheduler] Job synchronization completed.
+src/WorkerBrokerInteration
+├── Configurations/      options and dependency injection
+├── Consumers/           RabbitMQ consumers
+├── Controllers/         jobs API and queue test endpoints
+├── Domain/              entities, interfaces and message models
+├── Infrastructure/
+│   ├── Broker/          RabbitMQ connection, publisher and consumer base
+│   ├── Persistence/     EF Core context, seed and repository
+│   └── Scheduling/      Hangfire adapter and dashboard authentication
+├── Jobs/                sample jobs
+└── Services/            synchronizer, runner and job catalog
+tests/WorkerBrokerInteration.Tests
 ```
 
-## ⚙️ Configuration
+## Design notes
 
-### appsettings.json
+- Hangfire keeps its own state in memory on purpose. The database is the source of truth and the schedule is rebuilt on startup, so a restart only loses the run history. To keep history and retries across restarts, replace `UseInMemoryStorage()` with Hangfire.SqlServer or Hangfire.PostgreSql.
+- The database is created with `EnsureCreated` so the template runs with no setup. Use EF Core migrations in production.
+- A failed message is rejected without requeue, so it never loops. Bind the queue to a dead-letter exchange to keep it.
+- Hangfire retries a failed run up to 10 times, its default. The Quartz version waits for the next fire time instead.
 
-```json
-{
-  "ConfigHangFire": {
-    "WorkerCount": 5,
-    "SemaphoreTimeOutInMinutes": 30,
-    "DashboardAuth": {
-      "Username": "admin",
-      "Password": "your-secure-password"
-    },
-    "CronExpression": "* * * * *"  // How often to sync jobs
-  }
-}
+## Tests
+
+```bash
+dotnet test
 ```
-
-### Cron Expression Examples
-
-| Expression | Description |
-|------------|-------------|
-| `* * * * *` | Every minute |
-| `*/5 * * * *` | Every 5 minutes |
-| `0 * * * *` | Every hour |
-| `0 0 * * *` | Daily at midnight |
-| `0 0 * * 0` | Weekly on Sunday |
-
-## 🔧 Production Considerations
-
-### Replace Mock Repository
-
-The current `JobConfigurationRepository` uses an in-memory list. For production:
-
-1. Add Entity Framework Core packages
-2. Create `AppDbContext` with `DbSet<JobConfiguration>`
-3. Implement repository using EF Core
-4. Add connection string to `appsettings.json`
-
-### Use Persistent Storage
-
-Replace Hangfire's MemoryStorage with a persistent option:
-
-```csharp
-// SQL Server
-builder.Services.AddHangfire(config => 
-    config.UseSqlServerStorage(connectionString));
-
-// Redis
-builder.Services.AddHangfire(config => 
-    config.UseRedisStorage(connectionString));
-```
-
-## 📄 License
-
-MIT License - feel free to use this template in your projects.
-
-## 🤝 Contributing
-
-Contributions are welcome! Feel free to open issues or submit pull requests.
